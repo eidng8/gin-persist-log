@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"syscall"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func Test_DefaultServer(t *testing.T) {
 func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
 	tb.Helper()
 	setupDb(tb)
+	require.Nil(tb, os.Setenv("LISTEN", "127.0.0.1:34567"))
 	svr, conn, sigChan, stopChan, cleanup := DefaultServer()
 	svr.Config(
 		func(s *Server) {
@@ -44,6 +46,7 @@ func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
 			defer cleanup()
 		},
 	)
+	go svr.Serve()
 	return svr, conn
 }
 

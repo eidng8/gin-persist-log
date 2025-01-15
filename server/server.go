@@ -113,6 +113,8 @@ func (s *Server) LogRequest(gc *gin.Context) {
 	if nil != gc.Request.Body {
 		body, err = io.ReadAll(gc.Request.Body)
 		if err != nil {
+			s.Logger.Errorf("Failed to read request body: %v", err)
+			gc.AbortWithStatus(http.StatusBadRequest)
 			return
 		}
 		gc.Request.Body = io.NopCloser(bytes.NewBuffer(body))
