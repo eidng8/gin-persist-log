@@ -1,0 +1,5 @@
+# Set Unix line endings for all source code files
+* text=auto eol=lf
+
+# Ensure all text files use UTF-8 encoding
+* text=auto
