@@ -28,7 +28,7 @@ func Test_DefaultServer(t *testing.T) {
 func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
 	tb.Helper()
 	setupDb(tb)
-	require.Nil(tb, os.Setenv("LISTEN", "127.0.0.1:34567"))
+	require.Nil(tb, os.Setenv("LISTEN", "127.0.0.1:0"))
 	svr, conn, sigChan, stopChan, cleanup := DefaultServer()
 	svr.Config(
 		func(s *Server) {
