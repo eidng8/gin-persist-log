@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"database/sql"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,19 +12,34 @@ import (
 	"time"
 
 	sqldialect "entgo.io/ent/dialect/sql"
+	"github.com/eidng8/go-utils"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func Test_DefaultServer_inserts_body(t *testing.T) {
-	require.Nil(t, os.Unsetenv("LOG_DEBUG"))
-	times := 10
-	s, conn := setup(t)
-	for i := 0; i < times; i++ {
-		go testPost(t, s)
+func Test_Server_handles_error(t *testing.T) {
+	lsnr, err := net.Listen("tcp", ":0")
+	require.Nil(t, err)
+	svr := Server{
+		Logger: utils.NewLogger(),
+		Server: &http.Server{Addr: lsnr.Addr().String()},
 	}
-	time.Sleep(1100 * time.Millisecond)
-	requireDbCountWithBody(t, conn.DB(), times)
+	require.Panics(t, svr.Serve)
+}
+
+func Test_LogRequest_handles_dump_error(t *testing.T) {
+	of := dumpRequest
+	defer func() { dumpRequest = of }()
+	dumpRequest = func(r *http.Request, body bool) ([]byte, error) {
+		return nil, assert.AnError
+	}
+	svr, _ := setup(t)
+	gc, _ := gin.CreateTestContext(httptest.NewRecorder())
+	gc.Request = httptest.NewRequest(http.MethodGet, "http://localhost/t", nil)
+	svr.LogRequest(gc)
+	require.True(t, gc.IsAborted())
+	require.Equal(t, http.StatusBadRequest, gc.Writer.Status())
 }
 
 func Test_DefaultServer_inserts_null_body(t *testing.T) {
@@ -35,6 +51,17 @@ func Test_DefaultServer_inserts_null_body(t *testing.T) {
 	}
 	time.Sleep(1100 * time.Millisecond)
 	requireDbCountWithoutBody(t, conn.DB(), times)
+}
+
+func Test_DefaultServer_inserts_body(t *testing.T) {
+	require.Nil(t, os.Unsetenv("LOG_DEBUG"))
+	times := 10
+	s, conn := setup(t)
+	for i := 0; i < times; i++ {
+		go testPost(t, s)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	requireDbCountWithBody(t, conn.DB(), times)
 }
 
 func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
@@ -67,8 +94,7 @@ func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
 
 func testGet(tb testing.TB, s *Server) *httptest.ResponseRecorder {
 	tb.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/t", nil)
-	req.Host = "localhost"
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/t", nil)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Engine.ServeHTTP(w, req)
@@ -79,7 +105,9 @@ func testGet(tb testing.TB, s *Server) *httptest.ResponseRecorder {
 func testPost(tb testing.TB, s *Server) *httptest.ResponseRecorder {
 	tb.Helper()
 	body := []byte(`{"test":"value"}`)
-	req := httptest.NewRequest(http.MethodPost, "/t", bytes.NewReader(body))
+	req := httptest.NewRequest(
+		http.MethodPost, "/t?a=b%21c", bytes.NewReader(body),
+	)
 	req.Host = "localhost"
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -94,7 +122,7 @@ func requireDbCountWithoutBody(tb testing.TB, db *sql.DB, expected int) {
 	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
 	err := db.QueryRow(
 		`SELECT COUNT(*) FROM requests WHERE request=? AND headers=? AND body IS NULL;`,
-		"GET /t", "Host: localhost\r\nContent-Type: application/json\r\n\r\n",
+		"GET http://localhost/t", "Content-Type: application/json\r\n\r\n",
 	).Scan(&count)
 	require.Nil(tb, err)
 	require.Equal(tb, expected, count)
@@ -106,14 +134,10 @@ func requireDbCountWithBody(tb testing.TB, db *sql.DB, expected int) {
 	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
 	err := db.QueryRow(
 		`SELECT COUNT(*) FROM requests WHERE request=? AND headers=? AND body=?;`,
-		"POST /t", "Host: localhost\r\nContent-Type: application/json\r\n\r\n",
+		"POST http://localhost/t?a=b%21c",
+		"Host: localhost\r\nContent-Type: application/json\r\n\r\n",
 		sql.Null[[]byte]{V: []byte(`{"test":"value"}`), Valid: true},
 	).Scan(&count)
 	require.Nil(tb, err)
 	require.Equal(tb, expected, count)
 }
-
-// Host: localhost
-// Content-Type: application/json
-//
-// {"test":"value"}

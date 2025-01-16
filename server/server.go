@@ -20,6 +20,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var (
+	dumpRequest = httputil.DumpRequest
+)
+
 // Server is a struct that contains necessary instances.
 type Server struct {
 	Engine *gin.Engine
@@ -101,14 +105,14 @@ func (s *Server) Config(fn func(*Server)) { fn(s) }
 func (s *Server) LogRequest(gc *gin.Context) {
 	var err error
 	var body []byte
-	url := gc.Request.URL.String()
+	url := utils.RequestFullUrl(gc.Request)
 	method := gc.Request.Method
 	var sb strings.Builder
 	sb.Grow(len(url) + len(method) + 2)
 	sb.WriteString(method)
 	sb.WriteString(" ")
 	sb.WriteString(url)
-	headers, err := httputil.DumpRequest(gc.Request, false)
+	headers, err := dumpRequest(gc.Request, false)
 	if err != nil {
 		s.Logger.Errorf("Failed to read request headers: %v", err)
 		gc.AbortWithStatus(http.StatusBadRequest)

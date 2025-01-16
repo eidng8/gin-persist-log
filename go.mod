@@ -4,8 +4,8 @@ go 1.23.2
 
 require (
 	entgo.io/ent v0.14.1
-	github.com/eidng8/go-db v0.0.8
-	github.com/eidng8/go-utils v0.1.2
+	github.com/eidng8/go-db v0.0.9
+	github.com/eidng8/go-utils v0.1.3
 	github.com/gin-gonic/gin v1.10.0
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/stretchr/testify v1.10.0
