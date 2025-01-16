@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"strings"
@@ -10,22 +11,25 @@ import (
 	"github.com/eidng8/go-utils"
 )
 
-const numColumns = 3
+const numColumns = 4
 
 type RequestRecord struct {
 	Request string
+	Headers []byte
 	Body    []byte
 }
 
 func CreateDefaultTable(conn *sqldialect.Driver) error {
+	// Only MySQL, SQLite, and Oracle support BLOB
 	//goland:noinspection SqlNoDataSourceInspection
 	_, err := conn.ExecContext(
 		context.Background(),
 		`CREATE TABLE IF NOT EXISTS requests (
 			id BINARY(16) NOT NULL PRIMARY KEY,
-			request VARCHAR(8000) NOT NULL,
-			body VARBINARY(65535),
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);`,
+			request TEXT NOT NULL,
+			headers TEXT NOT NULL,
+			body BLOB,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
 	)
 	return err
 }
@@ -45,12 +49,18 @@ func BuildValues(data interface{}) (
 			continue
 		}
 		idx := count * numColumns
-		args[idx] = id.String()
+		args[idx], e = id.MarshalBinary()
+		if nil != e {
+			err = fmt.Errorf("error marshaling UUID: %w", e)
+			failed = append(failed, rec)
+			continue
+		}
 		args[idx+1] = rec.Request
-		if nil == rec.Body {
-			args[idx+2] = sqldialect.NullString{}
+		args[idx+2] = string(rec.Headers)
+		if nil == rec.Body || 0 == len(rec.Body) {
+			args[idx+3] = sql.Null[[]byte]{}
 		} else {
-			args[idx+2] = rec.Body
+			args[idx+3] = sql.Null[[]byte]{V: rec.Body, Valid: true}
 		}
 		count++
 	}
@@ -80,7 +90,7 @@ func SqlBuilder(log utils.TaggedLogger, failed io.Writer) func(data []any) (
 		sb.WriteString(")")
 		ps := sb.String()
 		sb.Reset()
-		sb.WriteString(`INSERT INTO requests (id, request, body) VALUES`)
+		sb.WriteString(`INSERT INTO requests (id, request, headers, body) VALUES`)
 		sb.Grow(pl * count)
 		sb.WriteString(strings.Repeat(ps, count)[1:])
 		sb.WriteString(";")

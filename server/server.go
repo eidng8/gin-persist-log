@@ -5,9 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"flag"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"os/signal"
 	"strings"
@@ -35,10 +35,8 @@ type Server struct {
 func DefaultServer() (
 	*Server, *sqldialect.Driver, chan os.Signal, chan struct{}, func(),
 ) {
-	logv := flag.Bool("log.v", false, "Enable debug logging")
-	flag.Parse()
 	var logger utils.SimpleTaggedLog
-	if *logv {
+	if d, e := utils.GetEnvBool("LOG_DEBUG", false); d && nil == e {
 		logger = utils.NewDebugLogger()
 	} else {
 		logger = utils.NewLogger()
@@ -110,6 +108,13 @@ func (s *Server) LogRequest(gc *gin.Context) {
 	sb.WriteString(method)
 	sb.WriteString(" ")
 	sb.WriteString(url)
+	headers, err := httputil.DumpRequest(gc.Request, false)
+	if err != nil {
+		s.Logger.Errorf("Failed to read request headers: %v", err)
+		gc.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+	idx := bytes.IndexByte(headers, '\n') + 1
 	if nil != gc.Request.Body {
 		body, err = io.ReadAll(gc.Request.Body)
 		if err != nil {
@@ -119,7 +124,7 @@ func (s *Server) LogRequest(gc *gin.Context) {
 		}
 		gc.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 	}
-	s.Writer.Push(RequestRecord{sb.String(), body})
+	s.Writer.Push(RequestRecord{sb.String(), headers[idx:], body})
 	gc.Next()
 }
 
