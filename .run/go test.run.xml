@@ -1,0 +1,16 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="go test" type="GoTestRunConfiguration" factoryName="Go Test">
+    <module name="gin-persist-log" />
+    <working_directory value="$PROJECT_DIR$" />
+    <go_parameters value="-race -test.v" />
+    <envs>
+      <env name="GIN_MODE" value="test" />
+    </envs>
+    <kind value="PACKAGE" />
+    <package value="github.com/eidng8/gin-persist-log/server" />
+    <directory value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$" />
+    <framework value="gotest" />
+    <method v="2" />
+  </configuration>
+</component>
