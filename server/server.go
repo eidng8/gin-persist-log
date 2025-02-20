@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -154,9 +155,20 @@ func (s *Server) LogRequest(gc *gin.Context) {
 
 func (s *Server) Serve() {
 	s.Logger.Infof("Serving on %s", s.Server.Addr)
-	if err := s.Server.ListenAndServe(); nil != err &&
-		!errors.Is(err, http.ErrServerClosed) {
-		s.Logger.Panicf("ListenAndServe error: %v", err)
+	if strings.HasPrefix(s.Server.Addr, "unix:") {
+		sock, err := net.Listen("unix", s.Server.Addr[5:])
+		if nil != err {
+			s.Logger.Panicf("Listen error: %v", err)
+		}
+		err = s.Server.Serve(sock)
+		if nil != err && !errors.Is(err, http.ErrServerClosed) {
+			s.Logger.Panicf("Serve error: %v", err)
+		}
+	} else {
+		err := s.Server.ListenAndServe()
+		if nil != err && !errors.Is(err, http.ErrServerClosed) {
+			s.Logger.Panicf("ListenAndServe error: %v", err)
+		}
 	}
 }
 
