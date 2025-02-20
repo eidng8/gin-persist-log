@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -105,20 +106,25 @@ func (s *Server) Config(fn func(*Server)) { fn(s) }
 func (s *Server) LogRequest(gc *gin.Context) {
 	var err error
 	var body []byte
+	rlw := &responseLogWriter{
+		body:           bytes.NewBuffer(make([]byte, 0, 65536)),
+		ResponseWriter: gc.Writer,
+	}
+	gc.Writer = rlw
 	url := utils.RequestFullUrl(gc.Request)
 	method := gc.Request.Method
 	var sb strings.Builder
-	sb.Grow(len(url) + len(method) + 2)
+	sb.Grow(len(url) + 10)
 	sb.WriteString(method)
 	sb.WriteString(" ")
 	sb.WriteString(url)
+	line := sb.String()
 	headers, err := dumpRequest(gc.Request, false)
 	if err != nil {
 		s.Logger.Errorf("Failed to read request headers: %v", err)
 		gc.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
-	idx := bytes.IndexByte(headers, '\n') + 1
 	if nil != gc.Request.Body {
 		body, err = io.ReadAll(gc.Request.Body)
 		if err != nil {
@@ -128,8 +134,22 @@ func (s *Server) LogRequest(gc *gin.Context) {
 		}
 		gc.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 	}
-	s.Writer.Push(RequestRecord{sb.String(), headers[idx:], body})
+	s.Writer.Push(TxRecord{line, headers, body, time.Now()})
 	gc.Next()
+	var buf bytes.Buffer
+	buf.Grow(4096)
+	_, err = fmt.Fprintf(&buf, "HTTP/1.1 %d %s\r\n", gc.Writer.Status(),
+		http.StatusText(gc.Writer.Status()))
+	if err != nil {
+		s.Logger.Errorf("Failed to dump response protocol: %v", err)
+		return
+	}
+	err = gc.Writer.Header().Clone().Write(&buf)
+	if err != nil {
+		s.Logger.Errorf("Failed to dump response headers: %v", err)
+		return
+	}
+	s.Writer.Push(TxRecord{line, buf.Bytes(), rlw.body.Bytes(), time.Now()})
 }
 
 func (s *Server) Serve() {

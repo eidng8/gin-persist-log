@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"database/sql"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,15 +13,49 @@ import (
 	"time"
 
 	sqldialect "entgo.io/ent/dialect/sql"
+	"github.com/cespare/xxhash/v2"
 	"github.com/eidng8/go-utils"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+func Test_BuildValues_with_response(t *testing.T) {
+	var rec interface{} = TxRecord{
+		Request: "abc",
+		Headers: []byte("test header"),
+		Body:    []byte("test body"),
+	}
+	data := []interface{}{rec}
+	count, args, _, err := BuildValues(data)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Len(t, args, numColumns)
+	require.IsType(t, []byte{}, args[0])
+	require.Len(t, args[0], 16)
+	hasher := xxhash.New()
+	_, err = hasher.WriteString("abc")
+	require.NoError(t, err)
+	require.Equal(t, fmt.Sprintf("%016x", hasher.Sum64()), args[1])
+	require.Equal(t, "test header", args[2])
+	require.Equal(t,
+		sql.Null[[]byte]{V: []byte("test body"), Valid: true}, args[3])
+}
+
+func Test_BuildValues_empty_response_returns_error(t *testing.T) {
+	var rec interface{} = TxRecord{
+		Request: "",
+		Headers: []byte("test header"),
+		Body:    []byte("test body"),
+	}
+	data := []interface{}{rec}
+	_, _, _, err := BuildValues(data)
+	require.NotNil(t, err)
+}
+
 func Test_Server_handles_error(t *testing.T) {
 	lsnr, err := net.Listen("tcp", ":0")
-	require.Nil(t, err)
+	require.NoError(t, err)
 	svr := Server{
 		Logger: utils.NewLogger(),
 		Server: &http.Server{Addr: lsnr.Addr().String()},
@@ -61,7 +96,30 @@ func Test_DefaultServer_inserts_body(t *testing.T) {
 		go testPost(t, s)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	requireDbCountWithBody(t, conn.DB(), times)
+	db := conn.DB()
+	var count int
+	hasher := xxhash.New()
+	_, err := hasher.WriteString("POST http://localhost/t?a=b%21c")
+	require.Nil(t, err)
+	hs := fmt.Sprintf("%016x", hasher.Sum64())
+	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
+	err = db.QueryRow(
+		`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
+		hs,
+		"POST /t?a=b%21c HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n",
+		sql.Null[[]byte]{V: []byte(`{"test":"value"}`), Valid: true},
+	).Scan(&count)
+	require.Nil(t, err)
+	require.Equal(t, times, count)
+	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
+	err = db.QueryRow(
+		`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
+		hs,
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
+		sql.Null[[]byte]{V: []byte(`"post ok"`), Valid: true},
+	).Scan(&count)
+	require.Nil(t, err)
+	require.Equal(t, times, count)
 }
 
 func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
@@ -72,10 +130,16 @@ func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
 	svr.Config(
 		func(s *Server) {
 			s.Engine.GET(
-				"/t", func(c *gin.Context) { c.Status(http.StatusOK) },
+				"/t", func(c *gin.Context) {
+					c.Data(http.StatusOK, "application/json",
+						[]byte(`"get ok"`))
+				},
 			)
 			s.Engine.POST(
-				"/t", func(c *gin.Context) { c.Status(http.StatusOK) },
+				"/t", func(c *gin.Context) {
+					c.Data(http.StatusOK, "application/json",
+						[]byte(`"post ok"`))
+				},
 			)
 		},
 	)
@@ -117,26 +181,51 @@ func testPost(tb testing.TB, s *Server) *httptest.ResponseRecorder {
 }
 
 func requireDbCountWithoutBody(tb testing.TB, db *sql.DB, expected int) {
-	tb.Helper()
 	var count int
+	hasher := xxhash.New()
+	_, err := hasher.WriteString("GET http://localhost/t")
+	require.Nil(tb, err)
+	hs := fmt.Sprintf("%016x", hasher.Sum64())
 	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
-	err := db.QueryRow(
-		`SELECT COUNT(*) FROM requests WHERE request=? AND headers=? AND body IS NULL;`,
-		"GET http://localhost/t", "Content-Type: application/json\r\n\r\n",
+	err = db.QueryRow(
+		`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body IS NULL;`,
+		hs,
+		"GET http://localhost/t HTTP/1.1\r\nContent-Type: application/json\r\n\r\n",
+	).Scan(&count)
+	require.Nil(tb, err)
+	require.Equal(tb, expected, count)
+	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
+	err = db.QueryRow(
+		`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
+		hs,
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
+		sql.Null[[]byte]{V: []byte(`"get ok"`), Valid: true},
 	).Scan(&count)
 	require.Nil(tb, err)
 	require.Equal(tb, expected, count)
 }
 
 func requireDbCountWithBody(tb testing.TB, db *sql.DB, expected int) {
-	tb.Helper()
 	var count int
+	hasher := xxhash.New()
+	_, err := hasher.WriteString("POST http://localhost/t?a=b%21c")
+	require.Nil(tb, err)
+	hs := fmt.Sprintf("%016x", hasher.Sum64())
 	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
-	err := db.QueryRow(
-		`SELECT COUNT(*) FROM requests WHERE request=? AND headers=? AND body=?;`,
-		"POST http://localhost/t?a=b%21c",
-		"Host: localhost\r\nContent-Type: application/json\r\n\r\n",
-		sql.Null[[]byte]{V: []byte(`{"test":"value"}`), Valid: true},
+	err = db.QueryRow(
+		`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
+		hs,
+		"POST /t?a=b%21c HTTP/1.1\r\nContent-Type: application/json\r\n",
+		sql.Null[[]byte]{V: []byte(`"post ok"`), Valid: true},
+	).Scan(&count)
+	require.Nil(tb, err)
+	require.Equal(tb, expected, count)
+	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
+	err = db.QueryRow(
+		`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
+		hs,
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
+		sql.Null[[]byte]{V: []byte(`"post ok"`), Valid: true},
 	).Scan(&count)
 	require.Nil(tb, err)
 	require.Equal(tb, expected, count)

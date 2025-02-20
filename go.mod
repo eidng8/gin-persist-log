@@ -4,6 +4,7 @@ go 1.23.2
 
 require (
 	entgo.io/ent v0.14.1
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/eidng8/go-db v0.0.9
 	github.com/eidng8/go-utils v0.1.3
 	github.com/gin-gonic/gin v1.10.0
