@@ -141,7 +141,7 @@ func (s *Server) LogRequest(gc *gin.Context) {
 	_, err = fmt.Fprintf(&buf, "HTTP/1.1 %d %s\r\n", gc.Writer.Status(),
 		http.StatusText(gc.Writer.Status()))
 	if err != nil {
-		s.Logger.Errorf("Failed to dump response protocol: %v", err)
+		s.Logger.Errorf("Failed to dump response status: %v", err)
 		return
 	}
 	err = gc.Writer.Header().Clone().Write(&buf)
