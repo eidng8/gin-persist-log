@@ -4,6 +4,7 @@
     <working_directory value="$PROJECT_DIR$" />
     <go_parameters value="-race -test.v" />
     <envs>
+      <env name="CGO_ENABLED" value="1" />
       <env name="GIN_MODE" value="test" />
     </envs>
     <kind value="PACKAGE" />

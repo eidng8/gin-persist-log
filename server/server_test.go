@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -69,63 +71,90 @@ func Test_LogRequest_handles_dump_error(t *testing.T) {
 	dumpRequest = func(r *http.Request, body bool) ([]byte, error) {
 		return nil, assert.AnError
 	}
-	svr, _ := setup(t)
-	gc, _ := gin.CreateTestContext(httptest.NewRecorder())
-	gc.Request = httptest.NewRequest(http.MethodGet, "http://localhost/t", nil)
-	svr.LogRequest(gc)
-	require.True(t, gc.IsAborted())
-	require.Equal(t, http.StatusBadRequest, gc.Writer.Status())
+	listens := []string{"127.0.0.1:0", "unix:/tmp/test.sock"}
+	for _, listen := range listens {
+		t.Run(listen, func(t *testing.T) {
+			if "windows" == runtime.GOOS && strings.HasPrefix(listen, "unix:") {
+				t.Skip("skipping on windows")
+			}
+			require.Nil(t, os.Setenv("LISTEN", listen))
+			svr, _ := setup(t)
+			gc, _ := gin.CreateTestContext(httptest.NewRecorder())
+			gc.Request = httptest.NewRequest(http.MethodGet,
+				"http://localhost/t", nil)
+			svr.LogRequest(gc)
+			require.True(t, gc.IsAborted())
+			require.Equal(t, http.StatusBadRequest, gc.Writer.Status())
+		})
+	}
 }
 
 func Test_DefaultServer_inserts_null_body(t *testing.T) {
 	require.Nil(t, os.Setenv("LOG_DEBUG", "true"))
 	times := 10
-	s, conn := setup(t)
-	for i := 0; i < times; i++ {
-		go testGet(t, s)
+	listens := []string{"127.0.0.1:0", "unix:/tmp/test.sock"}
+	for _, listen := range listens {
+		t.Run(listen, func(t *testing.T) {
+			if "windows" == runtime.GOOS && strings.HasPrefix(listen, "unix:") {
+				t.Skip("skipping on windows")
+			}
+			require.Nil(t, os.Setenv("LISTEN", listen))
+			s, conn := setup(t)
+			for i := 0; i < times; i++ {
+				go testGet(t, s)
+			}
+			time.Sleep(1100 * time.Millisecond)
+			requireDbCountWithoutBody(t, conn.DB(), times)
+		})
 	}
-	time.Sleep(1100 * time.Millisecond)
-	requireDbCountWithoutBody(t, conn.DB(), times)
 }
 
 func Test_DefaultServer_inserts_body(t *testing.T) {
 	require.Nil(t, os.Unsetenv("LOG_DEBUG"))
 	times := 10
-	s, conn := setup(t)
-	for i := 0; i < times; i++ {
-		go testPost(t, s)
+	listens := []string{"127.0.0.1:0", "unix:/tmp/test.sock"}
+	for _, listen := range listens {
+		t.Run(listen, func(t *testing.T) {
+			if "windows" == runtime.GOOS && strings.HasPrefix(listen, "unix:") {
+				t.Skip("skipping on windows")
+			}
+			require.Nil(t, os.Setenv("LISTEN", listen))
+			s, conn := setup(t)
+			for i := 0; i < times; i++ {
+				go testPost(t, s)
+			}
+			time.Sleep(1100 * time.Millisecond)
+			db := conn.DB()
+			var count int
+			hasher := xxhash.New()
+			_, err := hasher.WriteString("POST http://localhost/t?a=b%21c")
+			require.Nil(t, err)
+			hs := fmt.Sprintf("%016x", hasher.Sum64())
+			//goland:noinspection SqlNoDataSourceInspection,SqlResolve
+			err = db.QueryRow(
+				`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
+				hs,
+				"POST /t?a=b%21c HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n",
+				sql.Null[[]byte]{V: []byte(`{"test":"value"}`), Valid: true},
+			).Scan(&count)
+			require.Nil(t, err)
+			require.Equal(t, times, count)
+			//goland:noinspection SqlNoDataSourceInspection,SqlResolve
+			err = db.QueryRow(
+				`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
+				hs,
+				"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
+				sql.Null[[]byte]{V: []byte(`"post ok"`), Valid: true},
+			).Scan(&count)
+			require.Nil(t, err)
+			require.Equal(t, times, count)
+		})
 	}
-	time.Sleep(1100 * time.Millisecond)
-	db := conn.DB()
-	var count int
-	hasher := xxhash.New()
-	_, err := hasher.WriteString("POST http://localhost/t?a=b%21c")
-	require.Nil(t, err)
-	hs := fmt.Sprintf("%016x", hasher.Sum64())
-	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
-	err = db.QueryRow(
-		`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
-		hs,
-		"POST /t?a=b%21c HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n",
-		sql.Null[[]byte]{V: []byte(`{"test":"value"}`), Valid: true},
-	).Scan(&count)
-	require.Nil(t, err)
-	require.Equal(t, times, count)
-	//goland:noinspection SqlNoDataSourceInspection,SqlResolve
-	err = db.QueryRow(
-		`SELECT COUNT(*) FROM tx_log WHERE req_hash=? AND headers=? AND body=?;`,
-		hs,
-		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
-		sql.Null[[]byte]{V: []byte(`"post ok"`), Valid: true},
-	).Scan(&count)
-	require.Nil(t, err)
-	require.Equal(t, times, count)
 }
 
 func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
 	tb.Helper()
 	setupDb(tb)
-	require.Nil(tb, os.Setenv("LISTEN", "127.0.0.1:0"))
 	svr, conn, sigChan, stopChan, cleanup := DefaultServer()
 	svr.Config(
 		func(s *Server) {
