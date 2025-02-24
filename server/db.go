@@ -35,7 +35,7 @@ func CreateDefaultTable(conn *sqldialect.Driver) error {
 			headers TEXT NOT NULL,
 			body BLOB,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
-		CREATE INDEX ix_tx_log_hash ON tx_log (req_hash);`,
+		CREATE INDEX IF NOT EXISTS ix_tx_log_hash ON tx_log (req_hash);`,
 	)
 	return err
 }
