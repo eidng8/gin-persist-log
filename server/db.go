@@ -25,6 +25,118 @@ type TxRecord struct {
 }
 
 func CreateDefaultTable(conn *sqldialect.Driver) error {
+	// var tableStmt string
+	// ctx := context.Background()
+	// switch conn.Dialect() {
+	// case "mysql":
+	// 	// language=mysql
+	// 	//goland:noinspection SqlNoDataSourceInspection
+	// 	tableStmt = `
+	// 	CREATE TABLE IF NOT EXISTS tx_log (
+	// 		id BINARY(16) NOT NULL PRIMARY KEY,
+	// 		req_hash BINARY(16) NOT NULL KEY,
+	// 		headers TEXT NOT NULL,
+	// 		body BLOB,
+	// 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	// 	)`
+	// 	if _, err := conn.ExecContext(ctx, tableStmt); err != nil {
+	// 		return err
+	// 	}
+	//
+	// case "sqlite3":
+	// 	// language=sqlite
+	// 	//goland:noinspection SqlNoDataSourceInspection
+	// 	tableStmt = `
+	// 	CREATE TABLE IF NOT EXISTS tx_log (
+	// 		id BLOB PRIMARY KEY,
+	// 		req_hash BLOB NOT NULL,
+	// 		headers TEXT NOT NULL,
+	// 		body BLOB,
+	// 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	// 	);
+	// 	CREATE INDEX ix_tx_log_hash ON tx_log (req_hash);`
+	//
+	// case "postgres":
+	// 	tableStmt = `
+	// 	CREATE TABLE IF NOT EXISTS tx_log (
+	// 		id BYTEA PRIMARY KEY,
+	// 		req_hash BYTEA NOT NULL,
+	// 		headers TEXT NOT NULL,
+	// 		body BYTEA,
+	// 		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	// 	)`
+	// 	if _, err := conn.ExecContext(ctx, tableStmt); err != nil {
+	// 		return err
+	// 	}
+	// 	if _, err := conn.ExecContext(ctx,
+	// 		`CREATE INDEX IF NOT EXISTS ix_tx_log_hash ON tx_log (req_hash)`); err != nil {
+	// 		return err
+	// 	}
+	//
+	// case "sqlserver":
+	// 	tableStmt = `
+	// 	IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'tx_log')
+	// 	BEGIN
+	// 		CREATE TABLE tx_log (
+	// 			id BINARY(16) NOT NULL PRIMARY KEY,
+	// 			req_hash BINARY(16) NOT NULL,
+	// 			headers NVARCHAR(MAX) NOT NULL,
+	// 			body VARBINARY(MAX),
+	// 			created_at DATETIME NOT NULL DEFAULT GETDATE()
+	// 		)
+	// 	END`
+	// 	if _, err := conn.ExecContext(ctx, tableStmt); err != nil {
+	// 		return err
+	// 	}
+	// 	indexStmt := `
+	// 	IF NOT EXISTS (
+	// 		SELECT * FROM sys.indexes
+	// 		WHERE name = 'ix_tx_log_hash' AND object_id = OBJECT_ID('tx_log')
+	// 	)
+	// 	BEGIN
+	// 		CREATE INDEX ix_tx_log_hash ON tx_log (req_hash)
+	// 	END`
+	// 	if _, err := conn.ExecContext(ctx, indexStmt); err != nil {
+	// 		return err
+	// 	}
+	//
+	// case "oracle":
+	// 	// Oracle requires a PL/SQL block to conditionally create the table.
+	// 	tableStmt = `
+	// 	DECLARE
+	// 		cnt NUMBER;
+	// 	BEGIN
+	// 		SELECT COUNT(*) INTO cnt FROM user_tables WHERE table_name = UPPER('tx_log');
+	// 		IF cnt = 0 THEN
+	// 			EXECUTE IMMEDIATE 'CREATE TABLE tx_log (
+	// 				id RAW(16) PRIMARY KEY,
+	// 				req_hash RAW(16) NOT NULL,
+	// 				headers CLOB NOT NULL,
+	// 				body BLOB,
+	// 				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+	// 			)';
+	// 		END IF;
+	// 	END;`
+	// 	if _, err := conn.ExecContext(ctx, tableStmt); err != nil {
+	// 		return err
+	// 	}
+	// 	indexStmt := `
+	// 	DECLARE
+	// 		cnt NUMBER;
+	// 	BEGIN
+	// 		SELECT COUNT(*) INTO cnt FROM user_indexes WHERE index_name = UPPER('ix_tx_log_hash') AND table_name = UPPER('tx_log');
+	// 		IF cnt = 0 THEN
+	// 			EXECUTE IMMEDIATE 'CREATE INDEX ix_tx_log_hash ON tx_log (req_hash)';
+	// 		END IF;
+	// 	END;`
+	// 	if _, err := conn.ExecContext(ctx, indexStmt); err != nil {
+	// 		return err
+	// 	}
+	//
+	// default:
+	// 	return fmt.Errorf("unsupported dialect: %s", dialect)
+	// }
+
 	// Only MySQL, SQLite, and Oracle support BLOB
 	//goland:noinspection SqlNoDataSourceInspection
 	_, err := conn.ExecContext(
@@ -35,7 +147,7 @@ func CreateDefaultTable(conn *sqldialect.Driver) error {
 			headers TEXT NOT NULL,
 			body BLOB,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
-		CREATE INDEX IF NOT EXISTS ix_tx_log_hash ON tx_log (req_hash);`,
+		CREATE INDEX ix_tx_log_hash ON tx_log (req_hash);`,
 	)
 	return err
 }
@@ -114,3 +226,20 @@ func SqlBuilder(log utils.TaggedLogger, failed io.Writer) func(data []any) (
 		return sb.String(), args
 	}
 }
+
+// func ConnectDB() (*sql.DB, error) {
+// 	drv := os.Getenv("DB_DRIVER")
+// 	if "" == drv {
+// 		return drv, nil, errors.New("DB_DRIVER environment variable is not set")
+// 	}
+// 	dsn := os.Getenv("DB_DSN")
+// 	if "" != dsn {
+// 		conn, err := sql.Open(drv, dsn)
+// 		if err != nil {
+// 			return drv, nil, err
+// 		}
+// 		return drv, conn, nil
+// 	}
+// 	sss, ccc := sql.Open("sqlite3", "file:memdb1?mode=memory&cache=shared")
+// 	return sss
+// }

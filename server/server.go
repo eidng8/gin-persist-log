@@ -49,7 +49,10 @@ func DefaultServer() (
 	}
 	logger.Infof("Connecting to database...")
 	conn := sqldialect.OpenDB(db.ConnectX())
-	utils.PanicIfError(CreateDefaultTable(conn))
+	err := CreateDefaultTable(conn)
+	if err != nil {
+		logger.Errorf("Error occured while creating default table: %v", err)
+	}
 	// Prepare log files
 	path := utils.GetEnvWithDefault("DB_FAILED_FILE", "failed_db.log")
 	dblog, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
