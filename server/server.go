@@ -16,14 +16,20 @@ import (
 	"syscall"
 	"time"
 
-	sqldialect "entgo.io/ent/dialect/sql"
 	"github.com/eidng8/go-db"
 	"github.com/eidng8/go-utils"
 	"github.com/gin-gonic/gin"
+
+	"github.com/eidng8/gin-persist-log/internal"
 )
 
 var (
-	dumpRequest = httputil.DumpRequest
+	readBody             = io.ReadAll
+	serveSock            = serveSocket
+	listenSock           = listenSocket
+	dumpRequest          = httputil.DumpRequest
+	writeResponseLine    = writeResLine
+	writeResponseHeaders = writeResHeaders
 )
 
 // Server is a struct that contains necessary instances.
@@ -38,20 +44,14 @@ type Server struct {
 // 1) the created Server struct; 2) a cleanup function that must be called in
 // the main loop; 3) the channel for graceful shutdown signals; and 4) the
 // channel to stop the CachedWriter goroutine.
-func DefaultServer() (
-	*Server, *sqldialect.Driver, chan os.Signal, chan struct{}, func(),
+func DefaultServer(conn *sql.DB) (
+	*Server, chan os.Signal, chan struct{}, func(),
 ) {
 	var logger utils.SimpleTaggedLog
 	if d, e := utils.GetEnvBool("LOG_DEBUG", false); d && nil == e {
 		logger = utils.NewDebugLogger()
 	} else {
 		logger = utils.NewLogger()
-	}
-	logger.Infof("Connecting to database...")
-	conn := sqldialect.OpenDB(db.ConnectX())
-	err := CreateDefaultTable(conn)
-	if err != nil {
-		logger.Errorf("Error occured while creating default table: %v", err)
 	}
 	// Prepare log files
 	path := utils.GetEnvWithDefault("DB_FAILED_FILE", "failed_db.log")
@@ -66,7 +66,7 @@ func DefaultServer() (
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	// Start the background writer
 	builder := SqlBuilder(logger, reqlog)
-	writer := NewCachedWriter(conn.DB(), builder, logger, dblog)
+	writer := NewCachedWriter(conn, builder, logger, dblog)
 	writer.Start(stopChan)
 	// Create the server
 	host := utils.GetEnvWithDefault("LISTEN", ":80")
@@ -77,7 +77,7 @@ func DefaultServer() (
 		defer func() { utils.PanicIfError(reqlog.Close()) }()
 		defer func() { utils.PanicIfError(dblog.Close()) }()
 	}
-	return s, conn, sigChan, stopChan, cleanup
+	return s, sigChan, stopChan, cleanup
 }
 
 func NewServer(
@@ -87,7 +87,7 @@ func NewServer(
 		Server: svr, Writer: writer, Logger: logger,
 	}
 	s.Engine = gin.New()
-	s.Engine.Use(s.LogRequest, gin.Logger(), gin.Recovery())
+	s.Engine.Use(s.RequestLogger(), gin.Logger(), gin.Recovery())
 	svr.Handler = s.Engine
 	return s
 }
@@ -107,63 +107,64 @@ func NewCachedWriter(
 
 func (s *Server) Config(fn func(*Server)) { fn(s) }
 
-func (s *Server) LogRequest(gc *gin.Context) {
-	var err error
-	var body []byte
-	rlw := &responseLogWriter{
-		body:           bytes.NewBuffer(make([]byte, 0, 65536)),
-		ResponseWriter: gc.Writer,
-	}
-	gc.Writer = rlw
-	url := utils.RequestFullUrl(gc.Request)
-	method := gc.Request.Method
-	var sb strings.Builder
-	sb.Grow(len(url) + 10)
-	sb.WriteString(method)
-	sb.WriteString(" ")
-	sb.WriteString(url)
-	line := sb.String()
-	headers, err := dumpRequest(gc.Request, false)
-	if err != nil {
-		s.Logger.Errorf("Failed to read request headers: %v", err)
-		gc.AbortWithStatus(http.StatusBadRequest)
-		return
-	}
-	if nil != gc.Request.Body {
-		body, err = io.ReadAll(gc.Request.Body)
+func (s *Server) RequestLogger() func(gc *gin.Context) {
+	return func(gc *gin.Context) {
+		var err error
+		var body []byte
+		rlw := &internal.ResponseLogWriter{
+			Body:           bytes.NewBuffer(make([]byte, 0, 65536)),
+			ResponseWriter: gc.Writer,
+		}
+		gc.Writer = rlw
+		url := utils.RequestFullUrl(gc.Request)
+		method := gc.Request.Method
+		var sb strings.Builder
+		sb.Grow(len(url) + 10)
+		sb.WriteString(method)
+		sb.WriteString(" ")
+		sb.WriteString(url)
+		line := sb.String()
+		headers, err := dumpRequest(gc.Request, false)
 		if err != nil {
-			s.Logger.Errorf("Failed to read request body: %v", err)
+			s.Logger.Errorf("Failed to read request headers: %v", err)
 			gc.AbortWithStatus(http.StatusBadRequest)
 			return
 		}
-		gc.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+		if nil != gc.Request.Body {
+			body, err = readBody(gc.Request.Body)
+			if err != nil {
+				s.Logger.Errorf("Failed to read request body: %v", err)
+				gc.AbortWithStatus(http.StatusBadRequest)
+				return
+			}
+			gc.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+		}
+		s.Writer.Push(TxRecord{line, headers, body, time.Now()})
+		gc.Next()
+		var buf bytes.Buffer
+		buf.Grow(4096)
+		if err = writeResponseLine(gc, &buf); err != nil {
+			s.Logger.Errorf("Failed to dump response status: %v", err)
+			gc.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if err = writeResponseHeaders(gc, &buf); err != nil {
+			s.Logger.Errorf("Failed to dump response headers: %v", err)
+			gc.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		s.Writer.Push(TxRecord{line, buf.Bytes(), rlw.Body.Bytes(), time.Now()})
 	}
-	s.Writer.Push(TxRecord{line, headers, body, time.Now()})
-	gc.Next()
-	var buf bytes.Buffer
-	buf.Grow(4096)
-	_, err = fmt.Fprintf(&buf, "HTTP/1.1 %d %s\r\n", gc.Writer.Status(),
-		http.StatusText(gc.Writer.Status()))
-	if err != nil {
-		s.Logger.Errorf("Failed to dump response status: %v", err)
-		return
-	}
-	err = gc.Writer.Header().Clone().Write(&buf)
-	if err != nil {
-		s.Logger.Errorf("Failed to dump response headers: %v", err)
-		return
-	}
-	s.Writer.Push(TxRecord{line, buf.Bytes(), rlw.body.Bytes(), time.Now()})
 }
 
 func (s *Server) Serve() {
 	s.Logger.Infof("Serving on %s", s.Server.Addr)
 	if strings.HasPrefix(s.Server.Addr, "unix:") {
-		sock, err := net.Listen("unix", s.Server.Addr[5:])
+		sock, err := listenSock(s.Server.Addr[5:])
 		if nil != err {
 			s.Logger.Panicf("Listen error: %v", err)
 		}
-		err = s.Server.Serve(sock)
+		err = serveSock(s, sock)
 		if nil != err && !errors.Is(err, http.ErrServerClosed) {
 			s.Logger.Panicf("Serve error: %v", err)
 		}
@@ -178,4 +179,22 @@ func (s *Server) Serve() {
 func (s *Server) Shutdown() (context.CancelFunc, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	return cancel, s.Server.Shutdown(ctx)
+}
+
+func writeResLine(gc *gin.Context, writer io.Writer) error {
+	_, err := fmt.Fprintf(writer, "HTTP/1.1 %d %s\r\n", gc.Writer.Status(),
+		http.StatusText(gc.Writer.Status()))
+	return err
+}
+
+func writeResHeaders(gc *gin.Context, writer io.Writer) error {
+	return gc.Writer.Header().Clone().Write(writer)
+}
+
+func listenSocket(addr string) (net.Listener, error) {
+	return net.Listen("unix", addr)
+}
+
+func serveSocket(s *Server, sock net.Listener) error {
+	return s.Server.Serve(sock)
 }

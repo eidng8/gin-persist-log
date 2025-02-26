@@ -3,11 +3,19 @@ package main
 import (
 	"os"
 
+	"github.com/eidng8/go-utils"
+
 	"github.com/eidng8/gin-persist-log/server"
 )
 
 func main() {
-	svr, _, sigChan, stopChan, cleanup := server.DefaultServer()
+	cfg := server.ConnConfig{
+		Driver: os.Getenv("DB_DRIVER"),
+		Dsn:    os.Getenv("DB_DSN"),
+	}
+	conn, err := server.ConnectDB(&cfg)
+	utils.PanicIfError(server.CreateDefaultTable(&cfg, conn))
+	svr, sigChan, stopChan, cleanup := server.DefaultServer(conn)
 	defer cleanup()
 	svr.Config(route)
 	go svr.Serve()

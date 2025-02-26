@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"os"
 	"runtime"
 	"strings"
@@ -14,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	sqldialect "entgo.io/ent/dialect/sql"
 	"github.com/cespare/xxhash/v2"
 	"github.com/eidng8/go-utils"
 	"github.com/gin-gonic/gin"
@@ -65,9 +66,8 @@ func Test_Server_handles_error(t *testing.T) {
 	require.Panics(t, svr.Serve)
 }
 
-func Test_LogRequest_handles_dump_error(t *testing.T) {
-	of := dumpRequest
-	defer func() { dumpRequest = of }()
+func Test_RequestLogger_handles_dump_error(t *testing.T) {
+	defer func() { dumpRequest = httputil.DumpRequest }()
 	dumpRequest = func(r *http.Request, body bool) ([]byte, error) {
 		return nil, assert.AnError
 	}
@@ -82,9 +82,78 @@ func Test_LogRequest_handles_dump_error(t *testing.T) {
 			gc, _ := gin.CreateTestContext(httptest.NewRecorder())
 			gc.Request = httptest.NewRequest(http.MethodGet,
 				"http://localhost/t", nil)
-			svr.LogRequest(gc)
+			svr.RequestLogger()(gc)
 			require.True(t, gc.IsAborted())
 			require.Equal(t, http.StatusBadRequest, gc.Writer.Status())
+		})
+	}
+}
+
+func Test_RequestLogger_handles_read_body_error(t *testing.T) {
+	defer func() { readBody = io.ReadAll }()
+	readBody = func(r io.Reader) ([]byte, error) { return nil, assert.AnError }
+	listens := []string{"127.0.0.1:0", "unix:/tmp/test.sock"}
+	for _, listen := range listens {
+		t.Run(listen, func(t *testing.T) {
+			if "windows" == runtime.GOOS && strings.HasPrefix(listen, "unix:") {
+				t.Skip("skipping on windows")
+			}
+			require.Nil(t, os.Setenv("LISTEN", listen))
+			svr, _ := setup(t)
+			gc, _ := gin.CreateTestContext(httptest.NewRecorder())
+			body := []byte(`{"test":"value"}`)
+			gc.Request = httptest.NewRequest(
+				http.MethodPost, "/t?a=b%21c", bytes.NewReader(body),
+			)
+			svr.RequestLogger()(gc)
+			require.True(t, gc.IsAborted())
+			require.Equal(t, http.StatusBadRequest, gc.Writer.Status())
+		})
+	}
+}
+
+func Test_RequestLogger_handles_write_response_error(t *testing.T) {
+	defer func() { writeResponseLine = writeResLine }()
+	writeResponseLine = func(gc *gin.Context, r io.Writer) error {
+		return assert.AnError
+	}
+	listens := []string{"127.0.0.1:0", "unix:/tmp/test.sock"}
+	for _, listen := range listens {
+		t.Run(listen, func(t *testing.T) {
+			if "windows" == runtime.GOOS && strings.HasPrefix(listen, "unix:") {
+				t.Skip("skipping on windows")
+			}
+			require.Nil(t, os.Setenv("LISTEN", listen))
+			svr, _ := setup(t)
+			gc, _ := gin.CreateTestContext(httptest.NewRecorder())
+			gc.Request = httptest.NewRequest(http.MethodGet,
+				"http://localhost/t", nil)
+			svr.RequestLogger()(gc)
+			require.True(t, gc.IsAborted())
+			require.Equal(t, http.StatusInternalServerError, gc.Writer.Status())
+		})
+	}
+}
+
+func Test_RequestLogger_handles_write_headers_error(t *testing.T) {
+	defer func() { writeResponseHeaders = writeResHeaders }()
+	writeResponseHeaders = func(gc *gin.Context, r io.Writer) error {
+		return assert.AnError
+	}
+	listens := []string{"127.0.0.1:0", "unix:/tmp/test.sock"}
+	for _, listen := range listens {
+		t.Run(listen, func(t *testing.T) {
+			if "windows" == runtime.GOOS && strings.HasPrefix(listen, "unix:") {
+				t.Skip("skipping on windows")
+			}
+			require.Nil(t, os.Setenv("LISTEN", listen))
+			svr, _ := setup(t)
+			gc, _ := gin.CreateTestContext(httptest.NewRecorder())
+			gc.Request = httptest.NewRequest(http.MethodGet,
+				"http://localhost/t", nil)
+			svr.RequestLogger()(gc)
+			require.True(t, gc.IsAborted())
+			require.Equal(t, http.StatusInternalServerError, gc.Writer.Status())
 		})
 	}
 }
@@ -104,7 +173,7 @@ func Test_DefaultServer_inserts_null_body(t *testing.T) {
 				go testGet(t, s)
 			}
 			time.Sleep(1100 * time.Millisecond)
-			requireDbCountWithoutBody(t, conn.DB(), times)
+			requireDbCountWithoutBody(t, conn, times)
 		})
 	}
 }
@@ -124,7 +193,7 @@ func Test_DefaultServer_inserts_body(t *testing.T) {
 				go testPost(t, s)
 			}
 			time.Sleep(1100 * time.Millisecond)
-			db := conn.DB()
+			db := conn
 			var count int
 			hasher := xxhash.New()
 			_, err := hasher.WriteString("POST http://localhost/t?a=b%21c")
@@ -152,10 +221,38 @@ func Test_DefaultServer_inserts_body(t *testing.T) {
 	}
 }
 
-func setup(tb testing.TB) (*Server, *sqldialect.Driver) {
+func Test_Serve_handles_socket_error(t *testing.T) {
+	defer func() { listenSock = listenSocket }()
+	listenSock = func(_ string) (net.Listener, error) {
+		return nil, assert.AnError
+	}
+	svr := Server{
+		Logger: utils.NewLogger(),
+		Server: &http.Server{Addr: "unix:\\\\"},
+	}
+	require.Panics(t, svr.Serve)
+}
+
+func Test_Serve_handles_socket_serve_error(t *testing.T) {
+	defer func() { serveSock = serveSocket }()
+	defer func() { listenSock = listenSocket }()
+	listenSock = func(_ string) (net.Listener, error) {
+		return nil, nil
+	}
+	serveSock = func(s *Server, sock net.Listener) error {
+		return assert.AnError
+	}
+	svr := Server{
+		Logger: utils.NewLogger(),
+		Server: &http.Server{Addr: "unix:\\\\"},
+	}
+	require.Panics(t, svr.Serve)
+}
+
+func setup(tb testing.TB) (*Server, *sql.DB) {
 	tb.Helper()
-	setupDb(tb)
-	svr, conn, sigChan, stopChan, cleanup := DefaultServer()
+	_, conn := setupDb(tb)
+	svr, sigChan, stopChan, cleanup := DefaultServer(conn)
 	svr.Config(
 		func(s *Server) {
 			s.Engine.GET(

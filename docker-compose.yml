@@ -1,0 +1,31 @@
+services:
+  mysql:
+    image: mysql/mysql-server:8.0
+    environment:
+      MYSQL_DATABASE: 'test'
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_ROOT_PASSWORD: '123456'
+    networks:
+      - gin-persist-log
+    healthcheck:
+      test: [ 'CMD', '/healthcheck.sh' ]
+      interval: 1s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  golang:
+    image: golang:1.23
+    environment:
+      GIN_MODE: 'release'
+    volumes:
+      - .:/usr/src/gin-persist-log
+    networks:
+      - gin-persist-log
+    command: [ '/usr/local/go/bin/go', 'test', '-C', '/usr/src/gin-persist-log', '-coverprofile', 'cover.out', './...' ]
+    depends_on:
+      - mysql
+
+networks:
+  gin-persist-log:
+    driver: bridge
