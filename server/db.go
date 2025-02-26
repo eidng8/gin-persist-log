@@ -18,7 +18,7 @@ const numColumns = 5
 var uuid utils.UUID = &utils.Uuid{}
 var hasher internal.Hasher = &internal.XxHasher{}
 
-type ConnConfig struct {
+type DbConfig struct {
 	Driver, Dsn string
 	// Optional, just in case can't determine from `Driver`
 	Dialect string
@@ -31,7 +31,7 @@ type TxRecord struct {
 	At      time.Time
 }
 
-func CreateDefaultTable(cfg *ConnConfig, conn *sql.DB) error {
+func CreateDefaultTable(cfg *DbConfig, conn *sql.DB) error {
 	var dialect, stmt string
 	if "" == cfg.Dialect {
 		dialect = cfg.Driver
@@ -132,7 +132,7 @@ func SqlBuilder(log utils.TaggedLogger, failed io.Writer) func(data []any) (
 	}
 }
 
-func ConnectDB(cfg *ConnConfig) (*sql.DB, error) {
+func ConnectDB(cfg *DbConfig) (*sql.DB, error) {
 	if "" == cfg.Driver {
 		return nil, errors.New("invalid DB driver")
 	}

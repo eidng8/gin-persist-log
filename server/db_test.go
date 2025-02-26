@@ -31,19 +31,19 @@ func (m *mockHasher) WriteString(_ string) (n int, err error) {
 var _ internal.Hasher = &mockHasher{}
 
 func Test_ConnectDB_returns_error_if_no_driver(t *testing.T) {
-	_, err := ConnectDB(&ConnConfig{Dsn: ":memory:"})
+	_, err := ConnectDB(&DbConfig{Dsn: ":memory:"})
 	require.NotNil(t, err)
 	require.Equal(t, "invalid DB driver", err.Error())
 }
 
 func Test_ConnectDB_returns_error_if_no_dsn(t *testing.T) {
-	_, err := ConnectDB(&ConnConfig{Driver: "sqlite3"})
+	_, err := ConnectDB(&DbConfig{Driver: "sqlite3"})
 	require.NotNil(t, err)
 	require.Equal(t, "invalid DSN", err.Error())
 }
 
 func Test_ConnectDB_returns_error_if_invalid_config(t *testing.T) {
-	_, err := ConnectDB(&ConnConfig{Driver: "abc", Dsn: "def"})
+	_, err := ConnectDB(&DbConfig{Driver: "abc", Dsn: "def"})
 	require.NotNil(t, err)
 }
 
@@ -52,7 +52,7 @@ func Test_CreateDefaultTable_supports_mysql(t *testing.T) {
 	if _, err := os.Stat("/.dockerenv"); nil != err && "linux" != runtime.GOOS {
 		t.Skip("Only run in linux docker container")
 	}
-	cfg := ConnConfig{
+	cfg := DbConfig{
 		Driver: "mysql",
 		Dsn: (&mysql.Config{
 			Addr:                 "mysql:3306",
@@ -74,7 +74,7 @@ func Test_CreateDefaultTable_supports_mysql(t *testing.T) {
 
 //goland:noinspection SqlNoDataSourceInspection,SqlResolve
 func Test_CreateDefaultTable_supports_sqlite(t *testing.T) {
-	cfg := ConnConfig{
+	cfg := DbConfig{
 		Driver:  "sqlite3",
 		Dsn:     ":memory:?_journal=WAL&_timeout=5000",
 		Dialect: "sqlite3",
@@ -87,7 +87,7 @@ func Test_CreateDefaultTable_supports_sqlite(t *testing.T) {
 }
 
 func Test_CreateDefaultTable_returns_error_if_not_support(t *testing.T) {
-	cfg := ConnConfig{
+	cfg := DbConfig{
 		Driver:  "sqlite3",
 		Dsn:     ":memory:?_journal=WAL&_timeout=5000",
 		Dialect: "sqlite",
@@ -187,8 +187,8 @@ func Test_SqlBuilder_returns_nil_if_Fprintf_error(t *testing.T) {
 	require.Nil(t, a)
 }
 
-func setupDb(tb testing.TB) (*ConnConfig, *sql.DB) {
-	cfg := ConnConfig{
+func setupDb(tb testing.TB) (*DbConfig, *sql.DB) {
+	cfg := DbConfig{
 		Driver: "sqlite3",
 		Dsn:    ":memory:?_journal=WAL&_timeout=5000",
 	}
