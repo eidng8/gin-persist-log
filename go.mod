@@ -5,7 +5,7 @@ go 1.23.2
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/eidng8/go-db v0.0.10
-	github.com/eidng8/go-utils v0.2.7
+	github.com/eidng8/go-utils v0.2.8
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-sql-driver/mysql v1.9.0
 	github.com/mattn/go-sqlite3 v1.14.24

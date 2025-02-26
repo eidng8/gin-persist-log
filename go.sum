@@ -41,8 +41,8 @@ github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/eidng8/go-db v0.0.10 h1:tgzUSLpzne4UgJidWuxrvRNfFx0qu+vpOzekX5GFRNg=
 github.com/eidng8/go-db v0.0.10/go.mod h1:KFtMLMv/s7AQuhuXA1OErMHPgqF8Aq0RVTVzkXEzQRw=
-github.com/eidng8/go-utils v0.2.7 h1:/Xn3IGCRry5POfBEMtBDSIW7EEHEOUvrLlgE3j+jl6Q=
-github.com/eidng8/go-utils v0.2.7/go.mod h1:kH/oMit2Ru42Mp3dgV39LWcR7THD9T5Bu6PxKRX83bs=
+github.com/eidng8/go-utils v0.2.8 h1:wxuvGdhLWPHGSeeREPbP35taqVIEjSFbxvnlmA4KSqM=
+github.com/eidng8/go-utils v0.2.8/go.mod h1:kH/oMit2Ru42Mp3dgV39LWcR7THD9T5Bu6PxKRX83bs=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/gabriel-vasile/mimetype v1.4.8 h1:FfZ3gj38NjllZIeJAmMhr+qKL8Wu+nOoI3GqacKw1NM=
