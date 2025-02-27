@@ -40,37 +40,63 @@ type Server struct {
 	Logger utils.TaggedLogger
 }
 
+type Config struct {
+	// path to file to log failed requests
+	RequestLogFile string
+	// path to file to log failed db requests
+	DbLogFile string
+	// permission of log files to be created
+	FilePerm os.FileMode
+	// signals to listen for graceful shutdown
+	TermSignals []os.Signal
+	// address to listen on
+	ListenAddr string
+	// whether to log debug info
+	DebugLog bool
+}
+
+func DefaultConfigFromEnv() *Config {
+	mode, err := utils.GetEnvUint32("LOG_FILE_MODE", 0644)
+	utils.PanicIfError(err)
+	debug, err := utils.GetEnvBool("LOG_DEBUG", false)
+	utils.PanicIfError(err)
+	return &Config{
+		RequestLogFile: utils.GetEnvWithDefault("REQ_FAILED_FILE",
+			"failed_req.log"),
+		DbLogFile: utils.GetEnvWithDefault("DB_FAILED_FILE",
+			"failed_db.log"),
+		FilePerm:    os.FileMode(mode),
+		TermSignals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
+		ListenAddr:  utils.GetEnvWithDefault("LISTEN", ":80"),
+		DebugLog:    debug,
+	}
+}
+
 // DefaultServer creates a new server with default configurations. It returns:
 // 1) the created Server struct; 2) a cleanup function that must be called in
 // the main loop; 3) the channel for graceful shutdown signals; and 4) the
 // channel to stop the CachedWriter goroutine.
-func DefaultServer(conn *sql.DB) (
+func DefaultServer(conn *sql.DB, cfg *Config) (
 	*Server, chan os.Signal, chan struct{}, func(),
 ) {
-	var logger utils.SimpleTaggedLog
-	if d, e := utils.GetEnvBool("LOG_DEBUG", false); d && nil == e {
-		logger = utils.NewDebugLogger()
-	} else {
-		logger = utils.NewLogger()
-	}
+	logger := createLogger(cfg)
 	// Prepare log files
-	path := utils.GetEnvWithDefault("DB_FAILED_FILE", "failed_db.log")
-	dblog, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	dblog, err := os.OpenFile(cfg.DbLogFile,
+		os.O_CREATE|os.O_APPEND|os.O_WRONLY, cfg.FilePerm)
 	utils.PanicIfError(err)
-	path = utils.GetEnvWithDefault("REQ_FAILED_FILE", "failed_req.log")
-	reqlog, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	reqlog, err := os.OpenFile(cfg.RequestLogFile,
+		os.O_CREATE|os.O_APPEND|os.O_WRONLY, cfg.FilePerm)
 	utils.PanicIfError(err)
 	// Prepare graceful shutdown signals
 	stopChan := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, cfg.TermSignals...)
 	// Start the background writer
 	builder := SqlBuilder(logger, reqlog)
 	writer := NewCachedWriter(conn, builder, logger, dblog)
 	writer.Start(stopChan)
 	// Create the server
-	host := utils.GetEnvWithDefault("LISTEN", ":80")
-	svr := http.Server{Addr: host}
+	svr := http.Server{Addr: cfg.ListenAddr}
 	s := NewServer(&svr, writer, logger)
 	cleanup := func() {
 		defer func() { utils.PanicIfError(conn.Close()) }()
@@ -179,6 +205,13 @@ func (s *Server) Serve() {
 func (s *Server) Shutdown() (context.CancelFunc, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	return cancel, s.Server.Shutdown(ctx)
+}
+
+func createLogger(cfg *Config) utils.TaggedLogger {
+	if cfg.DebugLog {
+		return utils.NewDebugLogger()
+	}
+	return utils.NewLogger()
 }
 
 func writeResLine(gc *gin.Context, writer io.Writer) error {

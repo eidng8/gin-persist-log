@@ -22,7 +22,7 @@ services:
       - .:/usr/src/gin-persist-log
     networks:
       - gin-persist-log
-    command: [ '/usr/local/go/bin/go', 'test', '-C', '/usr/src/gin-persist-log', '-coverprofile', 'cover.out', './...' ]
+    command: [ '/usr/src/gin-persist-log/coverage.sh' ]
     depends_on:
       - mysql
 

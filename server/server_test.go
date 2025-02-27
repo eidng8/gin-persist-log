@@ -252,7 +252,8 @@ func Test_Serve_handles_socket_serve_error(t *testing.T) {
 func setup(tb testing.TB) (*Server, *sql.DB) {
 	tb.Helper()
 	_, conn := setupDb(tb)
-	svr, sigChan, stopChan, cleanup := DefaultServer(conn)
+	cfg := DefaultConfigFromEnv()
+	svr, sigChan, stopChan, cleanup := DefaultServer(conn, cfg)
 	svr.Config(
 		func(s *Server) {
 			s.Engine.GET(

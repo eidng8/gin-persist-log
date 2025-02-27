@@ -188,14 +188,14 @@ func Test_SqlBuilder_returns_nil_if_Fprintf_error(t *testing.T) {
 }
 
 func setupDb(tb testing.TB) (*DbConfig, *sql.DB) {
-	cfg := DbConfig{
-		Driver: "sqlite3",
-		Dsn:    ":memory:?_journal=WAL&_timeout=5000",
-	}
-	conn, err := ConnectDB(&cfg)
+	require.NoError(tb, os.Setenv("DB_DRIVER", "sqlite3"))
+	require.NoError(tb,
+		os.Setenv("DB_DSN", ":memory:?_journal=WAL&_timeout=5000"))
+	cfg := DefaultDbConfigFromEnv()
+	conn, err := ConnectDB(cfg)
 	require.Nil(tb, err)
-	require.Nil(tb, CreateDefaultTable(&cfg, conn))
-	return &cfg, conn
+	require.Nil(tb, CreateDefaultTable(cfg, conn))
+	return cfg, conn
 	// require.Nil(tb, os.Setenv("DB_DRIVER", "sqlite3"))
 	// require.Nil(tb, os.Setenv("DB_DSN", ":memory:?_journal=WAL&_timeout=5000"))
 	// require.Nil(tb, os.Setenv("DB_DRIVER", "mysql"))

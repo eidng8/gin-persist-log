@@ -31,6 +31,13 @@ type TxRecord struct {
 	At      time.Time
 }
 
+func DefaultDbConfigFromEnv() *DbConfig {
+	return &DbConfig{
+		Driver: utils.MustGetEnvNE("DB_DRIVER"),
+		Dsn:    utils.MustGetEnvNE("DB_DSN"),
+	}
+}
+
 func CreateDefaultTable(cfg *DbConfig, conn *sql.DB) error {
 	var dialect, stmt string
 	if "" == cfg.Dialect {
